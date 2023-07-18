@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
+from torch_geometric.datasets import TUDataset
+from torch_geometric.utils import remove_isolated_nodes, degree
 
 from networkx.algorithms.components import number_connected_components
 
@@ -30,28 +33,69 @@ def load_checkpoint(model, checkpoint_PATH):
 
 
 def Initial_graph_generate(args):
-    #初始化一个无向完全图
-    edge_d1 = []
-    edge_d2 = []
+    data = TUDataset('data/TUDataset', name='MUTAG')
+    absence_edge_ratio_sum = 0.0
+    node_category_probability_ratio = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float)
+    edge_category_probability_ratio = torch.tensor([0.0, 0.0, 0.0, 0.0], dtype=torch.float)
+    for i in data:
+        single_absence_edge_ratio = 1 - len(i.edge_index[0]) / (len(i.x) * degree(i.edge_index[0]).max())
+        absence_edge_ratio_sum += single_absence_edge_ratio
+        node_probability_per_category = torch.sum(i.x, axis=0) / len(i.x)
+        edge_probability_per_category = torch.sum(i.edge_attr, axis=0) / (len(i.x) * (len(i.x) - 1))
+        node_category_probability_ratio = node_category_probability_ratio + node_probability_per_category
+        edge_category_probability_ratio = edge_category_probability_ratio + edge_probability_per_category
+    node_category_probability = node_category_probability_ratio / len(data)
+    edge_category_probability_ratio_ave = edge_category_probability_ratio / len(data)
+    absence_edge_ratio = [absence_edge_ratio_sum / len(data)]
+    edge_category_probability = torch.tensor(absence_edge_ratio + edge_category_probability_ratio_ave.tolist(),
+                                             dtype=torch.float)
+
+    node_category_distribution = Categorical(node_category_probability)
+    edge_category_distribution = Categorical(edge_category_probability)
+
+    edge_categories = []
+    node_categories = []
+
+    for i in range(args.initNodeNum):
+        node_categories.append(node_category_distribution.sample().item())
+    for i in range(int(args.initNodeNum * (args.initNodeNum - 1) / 2)):
+        indicate_edge = edge_category_distribution.sample().item()
+        edge_categories.append(indicate_edge)
+        edge_categories.append(indicate_edge)
+
+    # edge_index
+    edge_index_complete = []
     for i in range(args.initNodeNum):
         for j in range(args.initNodeNum):
-            if i != j:
-                edge_d1.append(i)
-                edge_d2.append(j)
-    x_rand = torch.randint(0, 7, (1, args.initNodeNum))
-    for i in range(6):
-        x_rand[0][i] = 0
-    for i in range(2):
-        x_rand[0][6+i] = 2
-    x_rand[0][9] = 1
+            if j > i:
+                edge_index_complete.append([i, j])
+                edge_index_complete.append([j, i])
+    edge_index = torch.tensor(edge_index_complete, dtype=torch.long).T
+    # 构建边和边的类别
+    edge_categories_tensor = torch.tensor(edge_categories, dtype=torch.float)
+    edge_presence_indicator = edge_categories_tensor.bool()  # 用于指示不存在的边
 
-    x = F.one_hot(x_rand, num_classes=7).squeeze(0).float()
-    edge_index = torch.tensor([edge_d1, edge_d2]).long()
-    edge_type = torch.randint(0, 4, (1, len(edge_index[0])))
-    edge_attr = F.one_hot(edge_type, num_classes=4).squeeze(0).float()
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    print(data)
-    return data
+    edge_index = torch.stack((torch.masked_select(edge_index[0], edge_presence_indicator),
+                              torch.masked_select(edge_index[1], edge_presence_indicator)))
+
+    # edge_attr
+    edge_attr_1d = torch.masked_select(edge_categories_tensor, edge_presence_indicator).long()  # 去除不存在的边
+    edge_attr = F.one_hot(edge_attr_1d, num_classes=4).squeeze(0).float()
+
+    # 构建节点特征x
+    node_categories_tensor = torch.tensor(node_categories, dtype=torch.long)
+    x = F.one_hot(node_categories_tensor, num_classes=7).squeeze(0).float()
+    root_graph = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+
+    # 去除孤立节点
+    if root_graph.has_isolated_nodes():
+        _, _, node_mask = remove_isolated_nodes(root_graph.edge_index, num_nodes=len(root_graph.x))
+        x = x[node_mask]
+        edge_index = Fix_nodes_index(edge_index)
+        root_graph = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+
+    print(root_graph)
+    return root_graph
 
 def Fix_nodes_index(edge_index):
     b = edge_index.view(-1)

@@ -9,7 +9,7 @@ from torch_geometric.data import Data
 import time
 
 from GNNs import GCN
-from utils import regular_graph_generate, Rectify, Fix_nodes_index, Fix_mask_single_false, Is_exixt_in_list, Draw_graph
+from utils import root_graph_generate, Rectify, Fix_nodes_index, Fix_mask_single_false, Is_exixt_in_list, Draw_graph
 
 from Utils.mask_learner import Mask_learner
 from Utils.SA import Temperature_State, Metropolos
@@ -353,7 +353,7 @@ def Run_MCTS():
 
     # Create the initialized state and initialized node
 
-    init_node = Node(regular_graph_generate(args))
+    init_node = Node(root_graph_generate(args))
     init_node.set_root_node()
 
     current_node = init_node

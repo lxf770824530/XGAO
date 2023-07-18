@@ -13,15 +13,15 @@ network 2.5.1
 
 ## Data
 
-Our method is evaluated on three datasets, As shown in following table. These datasets can be found in an open-source library [DIG](https://github.com/divelab/DIG/tree/main/dig/xgraph/datasets), which can be directly used to reproduce results of existing GNN explanation methods, develop new algorithms, and conduct evaluations for explanation results.
-
+Our method is evaluated on following datasets. Is_Acyclic and MUTAG datasets can be found in an open-source library [DIG](https://github.com/divelab/DIG/tree/main/dig/xgraph/datasets), which can be directly used to reproduce results of existing GNN explanation methods, develop new algorithms, and conduct evaluations for explanation results.
+BA-2motif and Twitch Egos are available on [pyG](https://pytorch-geometric.readthedocs.io/en/latest/).
 
 | Dataset    | Task                  | Data class     |
 |------------|-----------------------|----------------|
-| [Is_Acyclic]() | Graph classification   | Synthetic data |
-| [BA-2motif]()  | Graph classification   | Synthetic data |
-| [Twitch Egos](https://snap.stanford.edu/data/twitch_ego_nets.html)| Graph classification  | Real-word data |
-| [MUTAG]()     | Graph classification  | Real-word data |
+| Is_Acyclic | Graph classification  | Synthetic data |
+| BA-2motif  | Graph classification  | Synthetic data |
+| Twitch Egos| Graph classification  | Real-word data |
+| MUTAG      | Graph classification  | Real-word data |
 
 
 ## How to use

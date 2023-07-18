@@ -6,6 +6,8 @@ from torch_geometric.utils import remove_isolated_nodes
 import matplotlib.pyplot as plt
 import numpy as np
 import random
+from torch.distributions.categorical import Categorical
+from dateset import IsAcyclicDataset
 
 from networkx.algorithms.components import number_connected_components
 
@@ -28,113 +30,48 @@ def load_checkpoint(model, checkpoint_PATH):
 
 
 
-def Initial_graph_generate(args):
-    #初始化一个无向完全图
-    edge_d1 = []
-    edge_d2 = []
+def root_graph_generate(args):
+    x = torch.ones((args.initNodeNum, 10), dtype=torch.float)
+
+    # Obtaining probability distribution
+    data = IsAcyclicDataset('data', name='Is_Acyclic')
+    absence_edge_ratio_sum = 0.0
+    for i in data:
+        single_absence_edge_ratio = 1 - len(i.edge_index[0]) / (len(i.x) * degree(i.edge_index[0]).max())
+        absence_edge_ratio_sum += single_absence_edge_ratio
+    absence_edge_ratio = absence_edge_ratio_sum / len(data)
+    probs = torch.FloatTensor([absence_edge_ratio, 1 - absence_edge_ratio])
+    edge_category_distribution = Categorical(probs)
+    edge_categories = []
+    for i in range(int(args.initNodeNum * (args.initNodeNum - 1) / 2)):
+        indicate_edge = edge_category_distribution.sample().item()
+        edge_categories.append(indicate_edge)
+        edge_categories.append(indicate_edge)
+
+    edge_index_complete = []
     for i in range(args.initNodeNum):
         for j in range(args.initNodeNum):
-            if i!=j:
-                edge_d1.append(i)
-                edge_d2.append(j)
+            if j > i:
+                edge_index_complete.append([i, j])
+                edge_index_complete.append([j, i])
+    edge_index = torch.tensor(edge_index_complete, dtype=torch.long).T
 
-    x = torch.Tensor(args.initNodeNum, 10).uniform_(-1,1)
-    edge_index = torch.tensor([edge_d1, edge_d2]).long()
+    edge_categories_tensor = torch.tensor(edge_categories, dtype=torch.float)
+    edge_presence_indicator = edge_categories_tensor.bool()
 
-    index_mask1 = torch.randint(low=0, high=2, size=(1, args.initNodeNum * (args.initNodeNum - 1))).bool()
-    index_mask2 = torch.randint(low=0, high=2, size=(1, args.initNodeNum * (args.initNodeNum - 1))).bool()
-    index_mask = index_mask1 | index_mask2
-    index_mask = torch.stack((index_mask[0],index_mask[0]))
+    edge_index = torch.stack((torch.masked_select(edge_index[0], edge_presence_indicator),
+                              torch.masked_select(edge_index[1], edge_presence_indicator)))
 
-    masked_edge_index = edge_index[index_mask].view(2,-1)
-    edge_attr = torch.ones(len(edge_d1),dtype=torch.float)
+    edge_attr = torch.masked_select(edge_categories_tensor, edge_presence_indicator)
+    root_graph = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+    if root_graph.has_isolated_nodes():
+        _, _, node_mask = remove_isolated_nodes(root_graph.edge_index, num_nodes=len(root_graph.x))
+        x = x[node_mask]
+        edge_index = Fix_nodes_index(edge_index)
+        root_graph = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
 
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    print(data)
-    return data
-
-
-def K_N_for_each_datdaset(args):
-    n=0
-    k=0
-    if args.explain_class == 0:
-        if args.dataset == 'Is_Acyclic':
-            n = 10
-            k = 3
-        elif args.dataset == 'BA-2Motif':
-            n = 30
-            k = 3
-        elif args.dataset == 'Twitch_Egos':
-            n = 31
-            k = 4
-        elif args.dataset == 'MUTAG':
-            n = 14
-            k = 3
-    elif args.explain_class == 1:
-        if args.dataset == 'Is_Acyclic':
-            n = 10
-            k = 3
-        elif args.dataset == 'BA-2Motif':
-            n = 30
-            k = 3
-        elif args.dataset == 'Twitch_Egos':
-            n = 28
-            k = 5
-        elif args.dataset == 'MUTAG':
-            n = 20
-            k = 3
-
-    return k,n
-
-
-def regular_graph_generate(args):
-
-
-    degree, initial_node_num = K_N_for_each_datdaset(args)
-    G = nx.generators.random_graphs.random_regular_graph(degree, initial_node_num)
-    while 1:
-        # initial_node_num+=1
-        if (degree * initial_node_num) % 2 != 0:
-            initial_node_num += 1
-            continue
-        # Construct graph
-        G = nx.generators.random_graphs.random_regular_graph(degree, initial_node_num)
-        # Compute Laplacian matrix
-        L = nx.laplacian_matrix(G)
-
-        # Compute eigenvalues
-        eigvals = np.linalg.eigvals(L.A)
-
-        # Check if graph is Ramanujan
-        d = G.degree(0)
-        lambda2 = eigvals[1]
-        if lambda2 <= 2 * np.sqrt(d - 1):
-            print("True!")
-            break
-        else:
-            print("False!")
-    # x是节点特征矩阵，这里设为单位矩阵。
-    x = torch.Tensor(G.number_of_nodes(), 10).uniform_(-1, 1)
-
-    # adj是图G的邻接矩阵的稀疏表示，左边节点对代表一条边，右边是边的值，adj是对称矩阵。
-    adj = nx.to_scipy_sparse_matrix(G).tocoo()
-
-    # row是adj中非零元素所在的行索引
-    row = torch.from_numpy(adj.row.astype(np.int64)).to(torch.long)
-    # col是adj中非零元素所在的列索引。
-    col = torch.from_numpy(adj.col.astype(np.int64)).to(torch.long)
-
-    # 将行和列进行拼接，shape变为[2, num_edges], 包含两个列表，第一个是row, 第二个是col
-    edge_index = torch.stack([row, col], dim=0)
-
-    edge_attr = torch.ones(len(row), dtype=torch.float)
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-
-    return data
-
-
-
-
+    print(root_graph)
+    return root_graph
 
 
 def Fix_nodes_index(edge_index):
